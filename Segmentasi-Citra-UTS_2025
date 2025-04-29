@@ -7,8 +7,9 @@ from PIL import Image
 import io
 
 # Fungsi untuk membangun model U-Net
-def unet_model(input_size=(128, 128, 1)):
+def build_unet(input_size=(128, 128, 1)):
     inputs = layers.Input(input_size)
+
     # Encoder
     c1 = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(inputs)
     c1 = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(c1)
@@ -24,44 +25,59 @@ def unet_model(input_size=(128, 128, 1)):
 
     # Decoder
     u4 = layers.UpSampling2D((2, 2))(c3)
-    u4 = layers.concatenate([u4, c2])
+    u4 = layers.Concatenate()([u4, c2])
     c4 = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(u4)
     c4 = layers.Conv2D(128, (3, 3), activation='relu', padding='same')(c4)
 
     u5 = layers.UpSampling2D((2, 2))(c4)
-    u5 = layers.concatenate([u5, c1])
+    u5 = layers.Concatenate()([u5, c1])
     c5 = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(u5)
     c5 = layers.Conv2D(64, (3, 3), activation='relu', padding='same')(c5)
 
     outputs = layers.Conv2D(1, (1, 1), activation='sigmoid')(c5)
 
-    model = models.Model(inputs=[inputs], outputs=[outputs])
+    model = models.Model(inputs, outputs)
     return model
 
-# Bangun model
-model = unet_model()
+# Inisialisasi dan kompilasi model
+model = build_unet()
 model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
 
-# Unggah citra sel darah
+# Unggah citra input
 uploaded = files.upload()
+
+# Proses dan prediksi setiap citra
 for fn in uploaded.keys():
+    # Baca dan siapkan citra grayscale
     img = Image.open(io.BytesIO(uploaded[fn])).convert('L')
     img = img.resize((128, 128))
-    img_array = np.array(img) / 255.0
-    img_array = img_array.reshape((1, 128, 128, 1))
+    img_array = np.array(img).astype('float32') / 255.0
+    img_array = np.expand_dims(img_array, axis=(0, -1))  # (1, 128, 128, 1)
 
-    # Prediksi segmentasi
-    pred_mask = model.predict(img_array)
+    # Prediksi mask segmentasi
+    pred_mask = model.predict(img_array)[0, :, :, 0]
 
-    # Tampilkan hasil
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
+    # Thresholding hasil segmentasi
+    threshold = 0.5
+    pred_mask_bin = (pred_mask > threshold).astype(np.uint8)
+
+    # Visualisasi hasil
+    plt.figure(figsize=(15, 5))
+
+    plt.subplot(1, 3, 1)
     plt.imshow(img_array[0, :, :, 0], cmap='gray')
     plt.title('Citra Asli')
     plt.axis('off')
 
-    plt.subplot(1, 2, 2)
-    plt.imshow(pred_mask[0, :, :, 0], cmap='gray')
-    plt.title('Hasil Segmentasi')
+    plt.subplot(1, 3, 2)
+    plt.imshow(pred_mask, cmap='gray')
+    plt.title('Probabilitas Mask')
     plt.axis('off')
+
+    plt.subplot(1, 3, 3)
+    plt.imshow(pred_mask_bin, cmap='gray')
+    plt.title('Mask Biner (Thresholded)')
+    plt.axis('off')
+
+    plt.tight_layout()
     plt.show()
